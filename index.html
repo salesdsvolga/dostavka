@@ -228,6 +228,20 @@
       .map(p => p.replace(/^г\.\s?о\.\s*/i, '').replace(/^г\.?\s+/i, '')).join(', ');
   }
 
+  // Короткая запись для сообщения курьеру: «Ново-Садовая 3», «Стройкерамика, Дружбы 14»
+  function courierAddress(raw) {
+    const a = parseAddress(raw);
+    if (!a.street || !a.house) return shortAddress(raw);
+    const place = a.settlement || (a.city && !/^самара$/i.test(a.city) ? a.city : '');
+    let street = a.street.replace(/^улица /, '');
+    // «Кирова проспект» → «проспект Кирова»; «Конный проезд», «5-я просека» остаются как есть
+    const m = street.match(/^(.+) (проспект|проезд|тупик|просека|переулок|шоссе|бульвар|площадь|набережная)$/);
+    if (m && !/(ый|ий|ой|ая|яя|ое|ее|-я|-й)$/i.test(m[1])) street = m[2] + ' ' + m[1];
+    return (place ? place + ', ' : '') + street + ' ' + a.house;
+  }
+  // В 1С название точки записано как «Название / по-русски / адрес» — курьеру хватает первой части
+  function courierName(name) { return clean(String(name || '').split(' / ')[0]); }
+
   // --- Расстояния
   function haversine(a, b) {
     const R = 6371000, rad = Math.PI / 180;
@@ -330,7 +344,7 @@
     return { lat, lon };
   }
 
-  G.Core = { parseSheet, parseAddress, geocodeQueries, pickHit, normHouse, shortAddress, addrKey, haversine, airMatrix, routeCost, optimizeOrder, splitLegs, yandexLink, parseCoords };
+  G.Core = { courierAddress, courierName, parseSheet, parseAddress, geocodeQueries, pickHit, normHouse, shortAddress, addrKey, haversine, airMatrix, routeCost, optimizeOrder, splitLegs, yandexLink, parseCoords };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
 
@@ -548,7 +562,9 @@
         + `<button class="small" data-fix="${esc(s.key)}" data-addr="${esc(s.address)}">Указать координаты</button></div>`).join('') + `</div>`;
     }
 
-    const text = [`Маршрут${title ? ' ' + title : ''}: ${r.found.length} ${plural(r.found.length, 'адрес', 'адреса', 'адресов')}, около ${km(total)}`];
+    const text = [];
+    if (title) text.push(title);
+    text.push(`${r.found.length} ${plural(r.found.length, 'адрес', 'адреса', 'адресов')}, ${places} ${plural(places, 'место', 'места', 'мест')}, около ${km(total)}`);
     let pos = 0, prevNode = 0, prevName = 'Склад: ' + r.startAddr, n = 0;
     sizes.forEach((size, li) => {
       const part = seq.slice(pos, pos + size);
@@ -558,7 +574,7 @@
       let items = `<li class="from"><span class="num">↓</span><div class="info">Отсюда: ${esc(prevName)}</div></li>`;
       const lines = [];
       for (const x of part) {
-        if (!x.f) { items += `<li><span class="num">⚑</span><div class="info"><div class="nm">${esc(r.endLabel)}</div></div></li>`; lines.push('Финиш — ' + r.endLabel); prevName = r.endLabel; continue; }
+        if (!x.f) { items += `<li><span class="num">⚑</span><div class="info"><div class="nm">${esc(r.endLabel)}</div></div></li>`; lines.push('', r.endLabel); prevName = r.endLabel; continue; }
         n++;
         const s = x.f.stop, g = x.f.g, nm = s.names.join('; ') || C.shortAddress(s.address);
         const pays = s.pays.map(payShort);
@@ -571,16 +587,19 @@
           + `<span class="tag"><a target="_blank" rel="noopener" href="https://yandex.ru/maps/?pt=${g.lon},${g.lat}&z=17&l=map">на карте</a></span>`
           + `<button class="small" data-fix="${esc(s.key)}" data-addr="${esc(s.address)}">поправить точку</button>`
           + `</div></div></li>`;
-        lines.push(`${n}. ${nm} — ${C.shortAddress(s.address)} (${s.places} ${plural(s.places, 'место', 'места', 'мест')}${pays.includes('Наличные') ? ', НАЛИЧНЫЕ' : ''})`);
+        const who = [...new Set(s.names.map(C.courierName).filter(Boolean))].join(', ');
+        lines.push('', `${n}. ${C.courierAddress(s.address)}`,
+          [who, `${s.places} ${plural(s.places, 'место', 'места', 'мест')}`, pays.includes('Наличные') ? 'наличные' : ''].filter(Boolean).join(', '));
         prevName = nm;
       }
       const range = first === n ? `адрес ${n}` : `адреса ${first}–${n}`;
       html += `<div class="card"><div class="leg-head"><h2>Маршрут ${li + 1} из ${sizes.length}</h2><small>${first <= n ? range + ', ' : ''}около ${km(dist)}</small></div>`
         + `<ol class="stops">${items}</ol>`
         + `<div class="row"><a class="btn main" target="_blank" rel="noopener" href="${link}">Открыть в Яндекс Картах</a><button data-copy="${esc(link)}">Скопировать ссылку</button></div></div>`;
-      text.push('', `Маршрут ${li + 1} из ${sizes.length}${first <= n ? ' (' + range + ')' : ''}:`, link, ...lines);
+      text.push('', '──────────', '', `Маршрут ${li + 1} из ${sizes.length}`, link, ...lines);
       pos += size; prevNode = part[part.length - 1].node;
     });
+    if (r.lost.length) text.push('', '──────────', '', 'Нет в маршруте, адрес не найден на карте', ...r.lost.map(s => C.courierAddress(s.address)));
     lastText = text.join('\n');
     $('out').innerHTML = html;
   }
