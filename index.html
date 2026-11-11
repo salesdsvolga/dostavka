@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Маршрут курьера</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1c1f24; --mute:#6b7280; --line:#e3e5ea; --acc:#fc3f1d; --ok:#1a8f4c; --warn:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 20px 14px 60px; }
+  h1 { font-size: 24px; margin: 6px 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 6px; }
+  p.sub { color: var(--mute); margin: 0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  #drop { border:2px dashed #c3c7cf; border-radius:14px; padding:28px 16px; text-align:center; background:var(--card); cursor:pointer; }
+  #drop.over { border-color: var(--acc); background:#fff5f2; }
+  #drop b { display:block; font-size:18px; margin-bottom:4px; }
+  #drop span { color:var(--mute); font-size:14px; }
+  label { display:block; font-size:14px; color:var(--mute); margin:10px 0 4px; }
+  input[type=text], input[type=number], select { width:100%; padding:10px 12px; border:1px solid #cfd3da; border-radius:10px; font:inherit; background:#fff; color:var(--ink); }
+  button, a.btn { display:inline-block; border:0; border-radius:10px; padding:10px 14px; font:inherit; font-weight:600; cursor:pointer; text-decoration:none; background:#eceef2; color:var(--ink); }
+  button.main, a.btn.main { background:var(--acc); color:#fff; }
+  button.small { padding:5px 9px; font-size:13px; font-weight:500; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  #status { margin:14px 0; color:var(--mute); min-height: 22px; }
+  #status.err { color:#b91c1c; }
+  .bar { height:6px; background:#e5e7eb; border-radius:3px; overflow:hidden; margin-top:6px; display:none; }
+  .bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .3s; }
+  .leg-head { display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .leg-head small { color:var(--mute); }
+  ol.stops { list-style:none; margin:10px 0 12px; padding:0; }
+  ol.stops li { display:flex; gap:10px; padding:9px 0; border-top:1px solid var(--line); }
+  ol.stops li.from { color:var(--mute); font-size:14px; }
+  .num { flex:0 0 30px; height:30px; border-radius:50%; background:var(--ink); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
+  li.from .num { background:#d5d8de; color:var(--ink); }
+  .info { flex:1; min-width:0; }
+  .info .nm { font-weight:600; }
+  .info .ad { font-size:14px; color:var(--mute); }
+  .tags { margin-top:3px; font-size:13px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .tag { background:#eef0f3; border-radius:6px; padding:1px 7px; }
+  .tag.cash { background:#dcfce7; color:#166534; font-weight:600; }
+  .tag.warn { background:#fef3c7; color:var(--warn); }
+  .tag a { color:inherit; }
+  .summary { font-size:15px; }
+  .summary b { font-size:17px; }
+  details summary { cursor:pointer; font-weight:600; }
+  .hint { font-size:13px; color:var(--mute); margin-top:6px; }
+  textarea { width:100%; min-height:90px; border:1px solid #cfd3da; border-radius:10px; padding:10px; font:13px/1.4 ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Маршрут курьера</h1>
+  <p class="sub">Загрузите маршрутный лист из 1С — получите ссылки на Яндекс Карты с адресами в порядке кратчайшего объезда.</p>
+
+  <div id="drop">
+    <b>Выбрать маршрутный лист (.xlsx)</b>
+    <span>или перетащите файл сюда</span>
+    <input type="file" id="file" accept=".xlsx,.xls" hidden>
+  </div>
+
+  <div id="status"></div>
+  <div class="bar" id="bar"><i></i></div>
+
+  <div class="card">
+    <details id="settings">
+      <summary>Настройки маршрута</summary>
+      <label for="startAddr">Откуда выезжает курьер</label>
+      <input type="text" id="startAddr" value="Самара, Садовая 292">
+      <label for="endSel">Где заканчивает</label>
+      <select id="endSel">
+        <option value="free">Где получится короче (последний адрес выберет программа)</option>
+        <option value="start">Вернуться на склад</option>
+        <option value="custom">Другой адрес…</option>
+      </select>
+      <div id="endCustomWrap" style="display:none">
+        <label for="endAddr">Адрес финиша</label>
+        <input type="text" id="endAddr" placeholder="Самара, улица и дом">
+      </div>
+      <label for="yaKey">Ключ Яндекса для поиска адресов (необязательно)</label>
+      <input type="text" id="yaKey" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+      <p class="hint">С ключом координаты адресов ищет Яндекс — так точнее. Без ключа — OpenStreetMap. Ключ бесплатный: <a href="https://developer.tech.yandex.ru/" target="_blank" rel="noopener">developer.tech.yandex.ru</a> → «Подключить API» → «JavaScript API и HTTP Геокодер». Хранится только в этом браузере.</p>
+      <label for="linkMode">Как передавать точки в ссылку</label>
+      <select id="linkMode">
+        <option value="auto">Координатами, а неточно найденные — адресом (Яндекс найдёт дом сам)</option>
+        <option value="text">Все адресом</option>
+        <option value="coords">Все координатами</option>
+      </select>
+      <label for="maxPts">Сколько точек помещается в один маршрут Яндекс Карт</label>
+      <input type="number" id="maxPts" value="10" min="3" max="30">
+      <div class="row" style="margin-top:12px">
+        <button class="main" id="rebuild">Пересчитать</button>
+        <button id="clearCache">Забыть сохранённые координаты</button>
+      </div>
+      <p class="hint">Координаты адресов запоминаются в этом браузере, поэтому знакомые точки на следующий день определяются мгновенно. Сам файл никуда не загружается: наружу уходят только адреса (в Яндекс или OpenStreetMap, чтобы найти координаты) и координаты (в сервис OSRM, чтобы посчитать расстояния по дорогам).</p>
+    </details>
+  </div>
+
+  <div id="out"></div>
+</main>
+
+<script src="xlsx.full.min.js"></script>
+
+<script id="core">
+/* ===== Логика без интерфейса: разбор листа, адреса, порядок объезда, ссылки ===== */
+(function (G) {
+  'use strict';
+
+  const clean = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+
+  // --- Разбор маршрутного листа: aoa — массив строк, каждая строка — массив ячеек
+  function parseSheet(aoa) {
+    const nextVal = (row, i) => { for (let j = i + 1; j < row.length; j++) { const v = clean(row[j]); if (v) return v; } return ''; };
+    const meta = { date: '', courier: '' };
+    const blocks = [];
+    let cur = null;
+    for (const rowRaw of aoa) {
+      const row = rowRaw || [];
+      for (let i = 0; i < row.length; i++) {
+        const t = clean(row[i]);
+        if (!t) continue;
+        const low = t.toLowerCase();
+        let m;
+        if (low === 'дата' && !cur && !meta.date) meta.date = nextVal(row, i);
+        else if (low === 'имя курьера') meta.courier = nextVal(row, i);
+        else if ((m = t.match(/^номер реализации\s*[-–—:]?\s*(.*)$/i))) { cur = { doc: clean(m[1]), name: '', address: '', places: 0, pay: '' }; blocks.push(cur); }
+        else if (cur && low === 'наименование') cur.name = nextVal(row, i);
+        else if (cur && low === 'адрес') cur.address = nextVal(row, i);
+        else if (cur && low === 'кол-во мест') cur.places = parseInt(nextVal(row, i), 10) || 0;
+        else if (cur && low === 'тип оплаты') cur.pay = nextVal(row, i);
+      }
+    }
+    // Несколько накладных на один адрес — одна остановка
+    const stops = [], byKey = new Map();
+    for (const b of blocks) {
+      if (!b.address) continue;
+      const key = addrKey(b.address);
+      let s = byKey.get(key);
+      if (!s) { s = { key, address: b.address, names: [], docs: [], places: 0, pays: [] }; byKey.set(key, s); stops.push(s); }
+      if (b.name && !s.names.includes(b.name)) s.names.push(b.name);
+      if (b.doc) s.docs.push(b.doc);
+      s.places += b.places;
+      if (b.pay && !s.pays.includes(b.pay)) s.pays.push(b.pay);
+    }
+    return { meta, stops, docsCount: blocks.length, noAddress: blocks.filter(b => !b.address).length };
+  }
+
+  const addrKey = a => clean(a).toLowerCase().replace(/ё/g, 'е').replace(/[\s.]/g, '');
+
+  // --- Разбор адреса в формате 1С на части
+  const STREET_TYPES = [
+    ['ул', 'улица'], ['улица', 'улица'], ['пр-кт', 'проспект'], ['просп', 'проспект'], ['проспект', 'проспект'], ['пр-д', 'проезд'], ['проезд', 'проезд'],
+    ['туп', 'тупик'], ['тупик', 'тупик'], ['просека', 'просека'], ['пер', 'переулок'], ['переулок', 'переулок'], ['ш', 'шоссе'], ['шоссе', 'шоссе'],
+    ['б-р', 'бульвар'], ['бульвар', 'бульвар'], ['пл', 'площадь'], ['площадь', 'площадь'], ['наб', 'набережная'], ['набережная', 'набережная'],
+    ['мкр', 'микрорайон'], ['кв-л', 'квартал'], ['аллея', 'аллея'], ['линия', 'линия'], ['спуск', 'спуск'], ['тракт', 'тракт'], ['дор', 'дорога']
+  ];
+  function parseAddress(raw) {
+    const r = { city: '', settlement: '', okrug: '', street: '', house: '' };
+    for (let p of clean(raw).split(',').map(clean).filter(Boolean)) {
+      let m;
+      if (/^\d{6}$/.test(p)) continue;
+      if (/(^|\s)(обл|область|респ|республика|край)\.?(\s|$)/i.test(p)) continue;
+      if ((m = p.match(/^г\.\s?о\.\s*(.+)$/i))) { r.okrug = m[1]; continue; }
+      if (/^вн\.?\s?р-н\s/i.test(p) || /^р-н\s/i.test(p) || /\sр-н$/i.test(p)) continue;
+      if ((m = p.match(/^(?:д|дом)\.?\s*(\d.*)$/i))) { r.house = m[1].replace(/\s+/g, ''); continue; }
+      if ((m = p.match(/^(?:стр|лит|литера)\.?\s*(.+)$/i))) { r.house += /^[а-яa-z]$/i.test(m[1]) ? m[1] : ' с' + m[1]; continue; }
+      if ((m = p.match(/^(?:корп|к)\.?\s*(.+)$/i))) { r.house += ' к' + m[1]; continue; }
+      if ((m = p.match(/^(?:г|город)\.?\s+(.+)$/i))) { r.city = m[1]; continue; }
+      if ((m = p.match(/^(?:пгт|рп|пос|п|с|д|снт|ст|х)\.?\s+(.+)$/i))) { r.settlement = m[1]; continue; }
+      const low = p.toLowerCase();
+      let done = false;
+      for (const [abbr, full] of STREET_TYPES) {
+        if (low.startsWith(abbr + ' ') || low.startsWith(abbr + '. ')) {
+          const name = clean(p.slice(abbr.length).replace(/^\./, ''));
+          r.street = full === 'улица' ? 'улица ' + name : name + ' ' + full;
+          done = true; break;
+        }
+      }
+      if (!done && !r.street && !/^\d/.test(p)) r.street = p;
+    }
+    return r;
+  }
+
+  // Варианты запроса к геокодеру OpenStreetMap: от точного к приблизительному.
+  // house — номер дома, который должен совпасть в ответе (иначе геокодер подсовывает соседний дом или просто улицу)
+  const normHouse = h => clean(h).toLowerCase().replace(/[\s.]/g, '').replace(/корпус|корп/g, 'к').replace(/строение|стр/g, 'с');
+  function streetForms(street) {
+    // «улица Ново-Садовая» и «Ново-Садовая улица» геокодер находит по-разному — пробуем оба порядка
+    const m = street.match(/^улица (.+)$/);
+    return m ? [m[1] + ' улица', street] : [street];
+  }
+  function geocodeQueries(raw) {
+    const a = parseAddress(raw);
+    let street = a.street, house = a.house, places = [];
+    if (street && house) {
+      for (const p of [a.settlement, a.city, a.okrug]) if (p && !places.includes(p)) places.push(p);
+    } else {
+      // адрес набран руками: «Самара, Садовая 292»
+      const text = clean(raw).replace(/^\d{6},?\s*/, '');
+      const m = text.match(/^([^,]+),\s*(.+?)[\s,]+(?:д\.?\s*)?(\d+[^\s,]*)$/);
+      if (!m) return [{ q: text, house: '', exact: true }];
+      places = [clean(m[1]).replace(/^г\.?\s+/i, '')]; house = m[3];
+      street = /улиц|проспект|просп|пр-кт|проезд|переул|шоссе|бульвар|тупик|просека|площад|набереж/i.test(m[2]) ? m[2] : 'улица ' + m[2].replace(/^ул\.?\s+/i, '');
+    }
+    if (!places.length) places.push('Самара');
+    const forms = streetForms(street), list = [];
+    for (const p of places) for (const f of forms) list.push({ q: `${f} ${house}, ${p}`, house, exact: true });
+    // дом с литерой или дробью не найден — пробуем тот же номер без литеры (точка будет рядом)
+    const bare = house.match(/^\d+/);
+    if (bare && bare[0] !== house) list.push({ q: `${forms[0]} ${bare[0]}, ${places[0]}`, house: bare[0], exact: false });
+    list.push({ q: `${forms[0]}, ${places[0]}`, house: '', exact: false });
+    return list;
+  }
+  // Какой из ответов геокодера подходит под запрос
+  function pickHit(results, v) {
+    if (!results || !results.length) return null;
+    if (!v.house) return results[0];
+    const want = normHouse(v.house);
+    return results.find(x => x.address && x.address.house_number && normHouse(x.address.house_number) === want) || null;
+  }
+
+  function shortAddress(raw) {
+    const parts = clean(raw).split(',').map(clean).filter(Boolean);
+    const hasCity = parts.some(p => /^г\.?\s+\S/i.test(p) && !/^г\.\s?о\./i.test(p));
+    return parts
+      .filter(p => !/^\d{6}$/.test(p) && !/(^|\s)(обл|область)\.?(\s|$)/i.test(p) && !/^вн\.?\s?р-н/i.test(p) && !(hasCity && /^г\.\s?о\./i.test(p)))
+      .map(p => p.replace(/^г\.\s?о\.\s*/i, '').replace(/^г\.?\s+/i, '')).join(', ');
+  }
+
+  // --- Расстояния
+  function haversine(a, b) {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  // Запасной вариант, если сервис дорог недоступен: по прямой с поправкой на городскую застройку
+  function airMatrix(pts) { return pts.map(a => pts.map(b => a === b ? 0 : haversine(a, b) * 1.35)); }
+
+  // --- Порядок объезда: старт — узел 0, обойти все остальные; конец свободный или задан (fixedEnd)
+  function routeCost(D, order) {
+    let c = 0, prev = 0;
+    for (const x of order) { c += D[prev][x]; prev = x; }
+    return c;
+  }
+  function optimizeOrder(D, fixedEnd, budgetMs) {
+    const n = D.length;
+    let ids = [];
+    for (let i = 1; i < n; i++) if (i !== fixedEnd) ids.push(i);
+    const tail = fixedEnd > 0 ? [fixedEnd] : [];
+    const full = o => routeCost(D, tail.length ? o.concat(tail) : o);
+    if (ids.length <= 1) return ids.concat(tail);
+
+    let seed = 12345;
+    const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+
+    // начальное решение — «ближайший сосед»
+    let cur = [], left = ids.slice(), at = 0;
+    while (left.length) { let bi = 0; for (let i = 1; i < left.length; i++) if (D[at][left[i]] < D[at][left[bi]]) bi = i; at = left[bi]; cur.push(at); left.splice(bi, 1); }
+
+    function improve(o) {
+      let best = full(o), m = o.length, better = true;
+      while (better) {
+        better = false;
+        // разворот куска
+        for (let i = 0; i < m - 1 && !better; i++) for (let j = i + 1; j < m; j++) {
+          const c = o.slice(0, i).concat(o.slice(i, j + 1).reverse(), o.slice(j + 1));
+          const v = full(c);
+          if (v < best - 1e-7) { o = c; best = v; better = true; break; }
+        }
+        // перенос куска из 1–3 точек в другое место
+        for (let len = 1; len <= 3 && !better; len++) for (let i = 0; i + len <= m && !better; i++) {
+          const seg = o.slice(i, i + len), rest = o.slice(0, i).concat(o.slice(i + len));
+          for (let k = 0; k <= rest.length; k++) {
+            if (k === i) continue;
+            for (let rev = 0; rev < (len > 1 ? 2 : 1); rev++) {
+              const c = rest.slice(0, k).concat(rev ? seg.slice().reverse() : seg, rest.slice(k));
+              const v = full(c);
+              if (v < best - 1e-7) { o = c; best = v; better = true; break; }
+            }
+            if (better) break;
+          }
+        }
+      }
+      return { o, v: best };
+    }
+
+    let best = improve(cur);
+    const t0 = Date.now(), budget = budgetMs == null ? 700 : budgetMs;
+    let it = 0;
+    while (ids.length > 3 && (it < 40 || Date.now() - t0 < budget) && it < 5000) {
+      it++;
+      // встряска: вырезаем случайный кусок и вставляем в случайное место, плюс один обмен
+      let c = best.o.slice();
+      const m = c.length, len = 1 + Math.floor(rnd() * Math.min(4, m - 1)), i = Math.floor(rnd() * (m - len + 1));
+      const seg = c.splice(i, len), k = Math.floor(rnd() * (c.length + 1));
+      c.splice(k, 0, ...(rnd() < 0.5 ? seg.reverse() : seg));
+      const a = Math.floor(rnd() * m), b = Math.floor(rnd() * m);
+      [c[a], c[b]] = [c[b], c[a]];
+      const r = improve(c);
+      if (r.v < best.v - 1e-7) best = r;
+    }
+    return best.o.concat(tail);
+  }
+
+  // --- Делим цепочку на маршруты: в каждом не больше maxPts точек, первая точка — конец предыдущего
+  function splitLegs(count, maxPts) {
+    const per = Math.max(1, maxPts - 1);
+    const k = Math.ceil(count / per);
+    const sizes = [];
+    for (let i = 0; i < k; i++) sizes.push(Math.floor(count / k) + (i < count % k ? 1 : 0));
+    return sizes;
+  }
+
+  function yandexLink(points) {
+    // точка — координаты или адрес текстом (тогда дом находит сам Яндекс)
+    return 'https://yandex.ru/maps/?rtext=' + points.map(p => p.text ? encodeURIComponent(p.text) : (+p.lat).toFixed(6) + ',' + (+p.lon).toFixed(6)).join('~') + '&rtt=auto';
+  }
+
+  // Координаты, введённые руками: «53.2415, 50.2212» или ссылка Яндекс Карт (там порядок долгота, широта)
+  function parseCoords(text) {
+    const s = String(text || '');
+    const url = s.match(/(?:ll|pt|point\]?)=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/i);
+    if (url) return { lat: +url[2], lon: +url[1] };
+    const m = s.match(/(-?\d+[.,]\d+)[\s,;]+(-?\d+[.,]\d+)/);
+    if (!m) return null;
+    const lat = +m[1].replace(',', '.'), lon = +m[2].replace(',', '.');
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return { lat, lon };
+  }
+
+  G.Core = { parseSheet, parseAddress, geocodeQueries, pickHit, normHouse, shortAddress, addrKey, haversine, airMatrix, routeCost, optimizeOrder, splitLegs, yandexLink, parseCoords };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+
+<script>
+/* ===== Интерфейс и обращения к сервисам ===== */
+(function () {
+  'use strict';
+  const C = window.Core, $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const SAMARA = { lat: 53.2, lon: 50.15 };
+  let sheet = null, lastText = '';
+
+  // --- память браузера: координаты адресов и настройки
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  let geoCache = store.get('courier-geo-v1', {});
+  const cfg = store.get('courier-cfg-v1', {});
+  if (cfg.start) $('startAddr').value = cfg.start;
+  if (cfg.maxPts) $('maxPts').value = cfg.maxPts;
+  if (cfg.endAddr) $('endAddr').value = cfg.endAddr;
+  if (cfg.linkMode) $('linkMode').value = cfg.linkMode;
+  $('yaKey').value = store.get('courier-yakey-v1', '');
+  const yaKey = () => $('yaKey').value.trim();
+
+  function status(t, err) { $('status').textContent = t; $('status').className = err ? 'err' : ''; }
+  function progress(p) { $('bar').style.display = p == null ? 'none' : 'block'; $('bar').firstElementChild.style.width = (p || 0) * 100 + '%'; }
+
+  // --- поиск координат (Nominatim / OpenStreetMap), не чаще одного запроса в секунду
+  let lastCall = 0;
+  async function nominatim(q) {
+    const wait = 1100 - (Date.now() - lastCall);
+    if (wait > 0) await sleep(wait);
+    lastCall = Date.now();
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=3&countrycodes=ru&accept-language=ru'
+      + '&viewbox=48.9,53.9,51.4,52.6&bounded=1&q=' + encodeURIComponent(q);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Сервис поиска адресов ответил ошибкой ' + r.status);
+    return r.json();
+  }
+  // --- поиск координат в Яндексе (HTTP Геокодер), если в настройках есть ключ
+  async function yandexGeocode(raw) {
+    await sleep(120);
+    const q = raw.replace(/^\s*\d{6},?\s*/, '');
+    const url = 'https://geocode-maps.yandex.ru/v1/?format=json&lang=ru_RU&results=1&ll=50.15,53.22&spn=1.6,1.2'
+      + '&apikey=' + encodeURIComponent(yaKey()) + '&geocode=' + encodeURIComponent(q);
+    const r = await fetch(url);
+    if (r.status === 403) throw new Error('Яндекс не принял ключ (если в кабинете разработчика у ключа задано ограничение по адресу сайта — добавьте туда адрес этой страницы)');
+    if (!r.ok) throw new Error('Яндекс ответил ошибкой ' + r.status);
+    const j = await r.json();
+    const o = (((j.response || {}).GeoObjectCollection || {}).featureMember || [])[0];
+    if (!o || !o.GeoObject || !o.GeoObject.Point) return null;
+    const [lon, lat] = o.GeoObject.Point.pos.split(' ').map(Number);
+    const md = (o.GeoObject.metaDataProperty || {}).GeocoderMetaData || {};
+    return { lat, lon, label: md.text || '', approx: !(md.precision === 'exact' || md.precision === 'number'), street: md.precision === 'street' || md.precision === 'other', src: 'yandex' };
+  }
+  // готовая точка из памяти; если появился ключ Яндекса — точки, найденные в OpenStreetMap, ищем заново
+  function cachedGeo(raw) {
+    const g = geoCache[C.addrKey(raw)];
+    if (!g) return null;
+    if (yaKey() && !g.manual && g.src !== 'yandex') return null;
+    return g;
+  }
+  async function geocode(raw) {
+    const key = C.addrKey(raw);
+    if (cachedGeo(raw)) return cachedGeo(raw);
+    let found = null;
+    if (yaKey()) {
+      found = await yandexGeocode(raw);
+      if (found) { geoCache[key] = found; store.set('courier-geo-v1', geoCache); }
+      return found;
+    }
+    for (const v of C.geocodeQueries(raw)) {
+      const hit = C.pickHit(await nominatim(v.q), v);
+      if (!hit) continue;
+      // exact — нашёлся именно этот дом; иначе соседний дом или только улица
+      found = { lat: +hit.lat, lon: +hit.lon, label: hit.display_name, approx: !v.exact, street: !v.house && !v.exact, src: 'osm' };
+      break;
+    }
+    if (found) { geoCache[key] = found; store.set('courier-geo-v1', geoCache); }
+    return found;
+  }
+
+  // --- расстояния по дорогам (OSRM); если недоступен — по прямой с поправкой
+  let matrixMemo = { key: '', D: null, road: false };
+  async function distanceMatrix(pts) {
+    const key = pts.map(p => p.lat.toFixed(5) + ',' + p.lon.toFixed(5)).join(';');
+    if (matrixMemo.key === key) return matrixMemo;
+    const air = C.airMatrix(pts);
+    let D = air, road = false;
+    try {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+      const r = await fetch('https://router.project-osrm.org/table/v1/driving/' + pts.map(p => p.lon.toFixed(6) + ',' + p.lat.toFixed(6)).join(';') + '?annotations=distance', { signal: ctl.signal });
+      clearTimeout(timer);
+      const j = await r.json();
+      if (j.code === 'Ok' && j.distances && j.distances.length === pts.length) {
+        D = j.distances.map((row, i) => row.map((v, k) => v == null ? air[i][k] : v));
+        road = true;
+      }
+    } catch (e) { /* остаёмся на расстояниях по прямой */ }
+    matrixMemo = { key, D, road };
+    return matrixMemo;
+  }
+
+  // --- чтение файла
+  async function loadFile(file) {
+    try {
+      status('Читаю файл…');
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      let best = null;
+      for (const name of wb.SheetNames) {
+        const p = C.parseSheet(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' }));
+        if (!best || p.stops.length > best.stops.length) best = p;
+      }
+      if (!best || !best.stops.length) { status('В файле не нашлось ни одной строки «Адрес». Похоже, это не маршрутный лист.', true); return; }
+      sheet = best;
+      fillEndSelect();
+      await build();
+    } catch (e) { progress(null); status('Не получилось прочитать файл: ' + e.message, true); }
+  }
+
+  function fillEndSelect() {
+    const sel = $('endSel'), keep = sel.value;
+    [...sel.querySelectorAll('option[data-stop]')].forEach(o => o.remove());
+    sheet.stops.forEach((s, i) => {
+      const o = document.createElement('option');
+      o.value = 'stop:' + s.key; o.dataset.stop = '1';
+      o.textContent = 'Последним: ' + (s.names[0] || C.shortAddress(s.address));
+      sel.appendChild(o);
+    });
+    sel.value = [...sel.options].some(o => o.value === keep) ? keep : 'free';
+  }
+
+  // --- основной расчёт
+  async function build() {
+    if (!sheet) { status('Сначала выберите файл маршрутного листа.'); return; }
+    const startAddr = $('startAddr').value.trim() || 'Самара, Садовая 292';
+    const maxPts = Math.max(3, parseInt($('maxPts').value, 10) || 10);
+    const endMode = $('endSel').value;
+    const linkMode = $('linkMode').value;
+    store.set('courier-cfg-v1', { start: startAddr, maxPts, endAddr: $('endAddr').value.trim(), linkMode });
+    store.set('courier-yakey-v1', yaKey());
+    $('out').innerHTML = '';
+    try {
+      const todo = [startAddr, ...sheet.stops.map(s => s.address)];
+      if (endMode === 'custom' && $('endAddr').value.trim()) todo.push($('endAddr').value.trim());
+      const fresh = todo.filter(a => !cachedGeo(a)).length;
+      let done = 0;
+      const geo = [];
+      for (const a of todo) {
+        const cached = !!cachedGeo(a);
+        if (!cached) { status(`Ищу координаты адресов: ${done + 1} из ${fresh}${yaKey() ? '' : '. Около секунды на адрес'}.`); progress(done / Math.max(1, fresh)); }
+        geo.push(await geocode(a));
+        if (!cached) done++;
+      }
+      progress(null);
+      const start = geo[0];
+      if (!start) { status('Не нашёл адрес склада «' + startAddr + '». Поправьте его в настройках.', true); $('settings').open = true; return; }
+      const found = [], lost = [];
+      sheet.stops.forEach((s, i) => { const g = geo[i + 1]; if (g) found.push({ stop: s, g }); else lost.push(s); });
+
+      // узлы: 0 — склад, дальше адреса, в конце (если нужно) финиш
+      const asText = (g, text) => linkMode === 'text' || (linkMode === 'auto' && g.approx && !g.manual);
+      const pts = [start, ...found.map(f => f.g)];
+      const linkPts = [asText(start, startAddr) ? { text: startAddr } : start, ...found.map(f => asText(f.g) ? { text: C.shortAddress(f.stop.address) } : f.g)];
+      let fixedEnd = -1, endLabel = '';
+      if (endMode === 'start') { pts.push(start); linkPts.push(linkPts[0]); fixedEnd = pts.length - 1; endLabel = 'Склад: ' + startAddr; }
+      else if (endMode === 'custom') {
+        const g = geo[todo.length - 1], t = $('endAddr').value.trim();
+        if (t && g) { pts.push(g); linkPts.push(asText(g) ? { text: t } : g); fixedEnd = pts.length - 1; endLabel = 'Финиш: ' + t; }
+        else if (t) status('Адрес финиша не найден, считаю со свободным концом.', true);
+      } else if (endMode.startsWith('stop:')) {
+        const i = found.findIndex(f => f.stop.key === endMode.slice(5));
+        if (i >= 0) fixedEnd = i + 1;
+      }
+
+      status('Считаю расстояния и порядок объезда…');
+      const { D, road } = await distanceMatrix(pts);
+      await sleep(20);
+      const order = C.optimizeOrder(D, fixedEnd);
+      render({ start, startAddr, found, lost, pts, linkPts, D, road, order, maxPts, endLabel });
+      status('');
+    } catch (e) { progress(null); status('Ошибка: ' + e.message + '. Проверьте интернет и нажмите «Пересчитать».', true); }
+  }
+
+  const km = m => (m / 1000).toFixed(m < 10000 ? 1 : 0).replace('.', ',') + ' км';
+  const payShort = p => /нал/i.test(p) && !/безнал/i.test(p) ? 'Наличные' : /безнал/i.test(p) ? 'Безнал' : p;
+
+  function render(r) {
+    const seq = r.order.map(n => ({ node: n, f: r.found[n - 1] || null }));   // f == null — это финишная точка
+    const total = C.routeCost(r.D, r.order);
+    const sizes = C.splitLegs(seq.length, r.maxPts);
+    const places = r.found.reduce((a, f) => a + f.stop.places, 0);
+    const cash = r.found.filter(f => f.stop.pays.some(p => payShort(p) === 'Наличные')).length;
+    const title = [sheet.meta.date, sheet.meta.courier].filter(Boolean).join(', ');
+
+    let html = `<div class="card summary"><b>${esc(title || 'Маршрутный лист')}</b><br>`
+      + `${r.found.length} ${plural(r.found.length, 'адрес', 'адреса', 'адресов')}, ${sheet.docsCount} ${plural(sheet.docsCount, 'накладная', 'накладные', 'накладных')}, ${places} ${plural(places, 'место', 'места', 'мест')}`
+      + (cash ? `, наличные на ${cash} ${plural(cash, 'точке', 'точках', 'точках')}` : '')
+      + `<br>Весь путь: около ${km(total)} ${r.road ? 'по дорогам' : '(оценка по прямой — сервис дорог не ответил)'}`
+      + `<div class="row" style="margin-top:12px"><button class="main" id="copyAll">Скопировать всё для курьера</button></div></div>`;
+
+    const approx = r.found.filter(f => f.g.approx && !f.g.manual);
+    const notes = [];
+    if (r.start.approx && !r.start.manual) notes.push(`Склад «${esc(r.startAddr)}» найден неточно: ${esc(r.start.label || '')}. <button class="small" data-fix="${esc(C.addrKey(r.startAddr))}" data-addr="${esc(r.startAddr)}">поправить точку</button>`);
+    if (approx.length) notes.push(`${approx.length} ${plural(approx.length, 'адрес найден', 'адреса найдены', 'адресов найдено')} неточно (соседний дом или только улица) — они помечены ниже. `
+      + (r.linkPts.some(p => p.text) ? 'В ссылку они переданы адресом, дом найдёт сам Яндекс; на порядок объезда это почти не влияет.' : 'Проверьте их по ссылке «на карте» и при необходимости поправьте.'));
+    if (notes.length) html += `<div class="card" style="border-color:#f3d28b;background:#fffbeb">${notes.join('<br>')}</div>`;
+
+    if (r.lost.length) {
+      html += `<div class="card"><h2>Не нашёл на карте — в маршрут не попали</h2>` + r.lost.map(s =>
+        `<div style="margin-top:8px"><b>${esc(s.names.join('; '))}</b><div class="ad">${esc(s.address)}</div>`
+        + `<button class="small" data-fix="${esc(s.key)}" data-addr="${esc(s.address)}">Указать координаты</button></div>`).join('') + `</div>`;
+    }
+
+    const text = [`Маршрут${title ? ' ' + title : ''}: ${r.found.length} ${plural(r.found.length, 'адрес', 'адреса', 'адресов')}, около ${km(total)}`];
+    let pos = 0, prevNode = 0, prevName = 'Склад: ' + r.startAddr, n = 0;
+    sizes.forEach((size, li) => {
+      const part = seq.slice(pos, pos + size);
+      const link = C.yandexLink([r.linkPts[prevNode], ...part.map(x => r.linkPts[x.node])]);
+      const dist = C.routeCost(r.D, part.map(x => x.node)) - 0 + (prevNode ? r.D[prevNode][part[0].node] - r.D[0][part[0].node] : 0);
+      const first = n + 1;
+      let items = `<li class="from"><span class="num">↓</span><div class="info">Отсюда: ${esc(prevName)}</div></li>`;
+      const lines = [];
+      for (const x of part) {
+        if (!x.f) { items += `<li><span class="num">⚑</span><div class="info"><div class="nm">${esc(r.endLabel)}</div></div></li>`; lines.push('Финиш — ' + r.endLabel); prevName = r.endLabel; continue; }
+        n++;
+        const s = x.f.stop, g = x.f.g, nm = s.names.join('; ') || C.shortAddress(s.address);
+        const pays = s.pays.map(payShort);
+        items += `<li><span class="num">${n}</span><div class="info"><div class="nm">${esc(nm)}</div><div class="ad">${esc(C.shortAddress(s.address))}</div><div class="tags">`
+          + `<span class="tag">${s.places} ${plural(s.places, 'место', 'места', 'мест')}</span>`
+          + pays.map(p => `<span class="tag ${p === 'Наличные' ? 'cash' : ''}">${esc(p)}</span>`).join('')
+          + (s.docs.length > 1 ? `<span class="tag">${s.docs.length} накладные: ${esc(s.docs.join(', '))}</span>` : `<span class="tag">№ ${esc(s.docs[0] || '')}</span>`)
+          + (g.approx && !g.manual ? `<span class="tag warn">${g.street ? 'нашлась только улица' : 'найден соседний дом'}</span>` : '')
+          + (g.manual ? `<span class="tag">точка указана вручную</span>` : '')
+          + `<span class="tag"><a target="_blank" rel="noopener" href="https://yandex.ru/maps/?pt=${g.lon},${g.lat}&z=17&l=map">на карте</a></span>`
+          + `<button class="small" data-fix="${esc(s.key)}" data-addr="${esc(s.address)}">поправить точку</button>`
+          + `</div></div></li>`;
+        lines.push(`${n}. ${nm} — ${C.shortAddress(s.address)} (${s.places} ${plural(s.places, 'место', 'места', 'мест')}${pays.includes('Наличные') ? ', НАЛИЧНЫЕ' : ''})`);
+        prevName = nm;
+      }
+      const range = first === n ? `адрес ${n}` : `адреса ${first}–${n}`;
+      html += `<div class="card"><div class="leg-head"><h2>Маршрут ${li + 1} из ${sizes.length}</h2><small>${first <= n ? range + ', ' : ''}около ${km(dist)}</small></div>`
+        + `<ol class="stops">${items}</ol>`
+        + `<div class="row"><a class="btn main" target="_blank" rel="noopener" href="${link}">Открыть в Яндекс Картах</a><button data-copy="${esc(link)}">Скопировать ссылку</button></div></div>`;
+      text.push('', `Маршрут ${li + 1} из ${sizes.length}${first <= n ? ' (' + range + ')' : ''}:`, link, ...lines);
+      pos += size; prevNode = part[part.length - 1].node;
+    });
+    lastText = text.join('\n');
+    $('out').innerHTML = html;
+  }
+
+  function plural(n, one, few, many) {
+    const a = Math.abs(n) % 100, b = a % 10;
+    return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many;
+  }
+
+  async function copy(text, btn) {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+    const old = btn.textContent; btn.textContent = 'Скопировано'; setTimeout(() => { btn.textContent = old; }, 1500);
+  }
+
+  // --- события
+  $('drop').addEventListener('click', () => $('file').click());
+  $('file').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; });
+  ['dragover', 'dragenter'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+  $('drop').addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+  $('rebuild').addEventListener('click', build);
+  $('linkMode').addEventListener('change', () => { if (sheet) build(); });
+  $('endSel').addEventListener('change', () => { $('endCustomWrap').style.display = $('endSel').value === 'custom' ? 'block' : 'none'; if (sheet && $('endSel').value !== 'custom') build(); });
+  $('clearCache').addEventListener('click', () => { if (confirm('Удалить все сохранённые координаты, включая исправленные вручную?')) { geoCache = {}; store.set('courier-geo-v1', geoCache); status('Координаты удалены. При следующем расчёте адреса будут найдены заново.'); } });
+  $('out').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.id === 'copyAll') copy(lastText, b);
+    else if (b.dataset.copy) copy(b.dataset.copy, b);
+    else if (b.dataset.fix) {
+      const v = prompt('Адрес: ' + b.dataset.addr + '\n\nВставьте координаты точки (в Яндекс Картах: правый клик по дому → «Что здесь?» → скопировать координаты) или ссылку на точку:');
+      if (v == null) return;
+      const c = C.parseCoords(v);
+      if (!c) { alert('Не разобрал координаты. Нужны два числа, например: 53.241500, 50.221200'); return; }
+      geoCache[b.dataset.fix] = { lat: c.lat, lon: c.lon, label: 'указано вручную', approx: false, manual: true };
+      store.set('courier-geo-v1', geoCache);
+      build();
+    }
+  });
+})();
+</script>
+</body>
+</html>
